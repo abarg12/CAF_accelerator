@@ -23,9 +23,19 @@ receive signal.
 
 ### Running it
 
+The Python environment is managed with `venv`. Create it once from the repo root:
+
+    python3 -m venv .venv
+    source .venv/bin/activate        # Windows: .venv\Scripts\activate
     pip install -r requirements.txt
+
+Then, with the environment activated:
+
     python baseline/run_baseline.py
     python -m pytest tests
+
+Run `deactivate` to leave the environment. The `.venv/` folder is ignored by
+git, so each machine builds its own from `requirements.txt`.
 
 The range-Doppler map returned by `calculate_cross_ambiguity` has shape
 `(num_of_samples, num_of_freq_bins)`: rows are delay (range) bins and columns
