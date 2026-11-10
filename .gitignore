@@ -3,3 +3,6 @@ __pycache__/
 .pytest_cache/
 .venv/
 range_doppler_map.png
+hls/caf_baseline.proj/
+hls/caf_test
+*.log

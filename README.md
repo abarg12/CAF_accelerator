@@ -40,3 +40,40 @@ git, so each machine builds its own from `requirements.txt`.
 The range-Doppler map returned by `calculate_cross_ambiguity` has shape
 `(num_of_samples, num_of_freq_bins)`: rows are delay (range) bins and columns
 are Doppler bins. `delay_axis` and `doppler_axis` give the labels for each.
+
+## HLS baseline
+
+The Vitis HLS baseline in `hls/` is a direct C++ port of the Python reference
+model, with no HLS pragmas. It gives the starting latency and resource numbers
+that later optimizations are measured against.
+
+| File | Purpose |
+| --- | --- |
+| `hls/caf.cpp` | Top function `cross_ambiguity`: frequency shift, FFT cross correlation, range-Doppler map |
+| `hls/fft.cpp` | Radix-2 FFT and inverse FFT |
+| `hls/caf.h` | Sizes (256 samples, 256 Doppler bins), data type, and prototypes |
+| `hls/caf_test.cpp` | Self checking testbench |
+| `hls/run_hls.tcl` | C simulation and C synthesis for the PYNQ-Z2 (xc7z020clg400-1) at 100 MHz |
+
+### Running it
+
+With Vitis HLS, from the `hls/` folder:
+
+    vitis_hls -f run_hls.tcl                      # Vitis HLS 2023.2 and earlier
+    vitis-run --mode hls --tcl run_hls.tcl        # Vitis 2024.1 and later
+
+The testbench also runs without Vitis:
+
+    g++ -o caf_test caf.cpp fft.cpp caf_test.cpp && ./caf_test
+
+## References
+
+- C. D. Long, T. Brant, L. Brand, and J. D. Ouellette, "Hardware-in-the-Loop
+  Simulation with PYNQ for Radar Applications," Proceedings of the 15th GNU
+  Radio Conference, 2025. The Python baseline and the CAF structure follow
+  this paper.
+- R. Kastner, J. Matai, and S. Neuendorffer, "Parallel Programming for FPGAs,"
+  https://github.com/KastnerRG/pp4fpgas. The FFT in `hls/fft.cpp` is adapted
+  from the `fft_sw` example in this repository, which is licensed under
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The changes are
+  listed at the top of that file.
