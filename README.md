@@ -97,10 +97,9 @@ that later optimizations are measured against.
 
 ### Running it
 
-With Vitis HLS, from the `hls/` folder:
+From the `hls/` folder:
 
-    vitis_hls -f run_hls.tcl                      # Vitis HLS 2023.2 and earlier
-    vitis-run --mode hls --tcl run_hls.tcl        # Vitis 2024.1 and later
+    vitis-run --mode hls --tcl run_hls.tcl
 
 The testbench also runs without Vitis:
 

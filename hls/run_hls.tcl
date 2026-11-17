@@ -1,7 +1,6 @@
 # Vitis HLS script for the CAF baseline.
 #
-#   vitis_hls -f run_hls.tcl                      (Vitis HLS 2023.2 and earlier)
-#   vitis-run --mode hls --tcl run_hls.tcl        (Vitis 2024.1 and later)
+#   vitis-run --mode hls --tcl run_hls.tcl
 
 open_project caf_baseline.proj -reset
 add_files caf.cpp
