@@ -70,12 +70,14 @@ stage_loop:
 	// Perform butterflies for j-th stage
 	butterfly_loop:
 		for (j = 0; j < numBF; j++) {
+#pragma HLS loop_tripcount min=1 max=128 avg=32
 			c = cos(a);
 			s = sin(a);
 			a = a + e;
 		// Compute butterflies that use same W**k
 		dft_loop:
 			for (i = j; i < NUM_OF_SAMPLES; i += DFTpts) {
+#pragma HLS loop_tripcount min=1 max=128 avg=32
 				i_lower = i + numBF; // index of lower point in butterfly
 				temp_R = X_R[i_lower] * c - X_I[i_lower] * s;
 				temp_I = X_I[i_lower] * c + X_R[i_lower] * s;

@@ -93,7 +93,7 @@ that later optimizations are measured against.
 | `hls/fft.cpp` | Radix-2 FFT and inverse FFT |
 | `hls/caf.h` | Sizes (256 samples, 256 Doppler bins), data type, and prototypes |
 | `hls/caf_test.cpp` | Self checking testbench |
-| `hls/run_hls.tcl` | C simulation and C synthesis for the PYNQ-Z2 (xc7z020clg400-1) at 100 MHz |
+| `hls/run_hls.tcl` | C simulation, C synthesis, and C/RTL co-simulation for the PYNQ-Z2 (xc7z020clg400-1) at 100 MHz |
 
 ### Running it
 
