@@ -74,3 +74,55 @@ def test_cross_correlation_matches_direct_sum():
         ]
     )
     assert np.allclose(cross_correlation(transmit_signal, receive_signal), direct, atol=1e-3)
+
+
+def test_fm_transmit_signal_is_constant_envelope_and_band_limited():
+    from signal_generation import generate_fm_transmit_signal
+
+    num_of_samples = 4096
+    signal = generate_fm_transmit_signal(
+        num_of_samples, SAMPLE_RATE, np.random.default_rng(seed=3)
+    )
+    assert np.allclose(np.abs(signal), 1, atol=1e-5)
+
+    # Carson's rule: about 2 * (75 + 53) = 256 kHz. Almost all power lies within
+    # +/-200 kHz, far less than the +/-500 kHz a white noise signal would cover.
+    power = np.abs(np.fft.fft(signal)) ** 2
+    frequencies = np.fft.fftfreq(num_of_samples, d=1 / SAMPLE_RATE)
+    assert power[np.abs(frequencies) <= 200_000].sum() / power.sum() > 0.99
+
+
+def test_stationary_clutter_appears_at_zero_doppler():
+    from signal_generation import add_stationary_clutter
+
+    num_of_samples = 256
+    freq_step = SAMPLE_RATE / num_of_samples
+    transmit_signal = generate_transmit_signal(num_of_samples, np.random.default_rng(seed=4))
+    receive_signal = add_stationary_clutter(
+        np.zeros(num_of_samples, dtype=np.complex64), transmit_signal, [30, 90], [1.0, 0.5]
+    )
+    range_doppler_map = calculate_cross_ambiguity(
+        transmit_signal, receive_signal, num_of_samples, num_of_samples, freq_step, SAMPLE_RATE
+    )
+    zero_doppler_column = int(np.argmin(np.abs(doppler_axis(num_of_samples, freq_step))))
+    assert np.isclose(range_doppler_map[30, zero_doppler_column], 1.0, atol=0.05)
+    assert np.isclose(range_doppler_map[90, zero_doppler_column], 0.5, atol=0.05)
+
+
+def test_paper_scenario_recovers_moving_target():
+    import run_baseline
+
+    num_of_samples = 256
+    transmit_signal, receive_signal, freq_step, target_delay, _ = run_baseline.build_scenario(
+        num_of_samples, num_of_samples, np.random.default_rng(seed=0)
+    )
+    map_db = run_baseline.range_doppler_magnitude_db(
+        transmit_signal, receive_signal, num_of_samples, num_of_samples, freq_step
+    )
+    doppler_hz = doppler_axis(num_of_samples, freq_step)
+    map_db[:, np.abs(doppler_hz) < SAMPLE_RATE / num_of_samples] = -np.inf  # ignore clutter
+    peak_row, peak_column = np.unravel_index(np.argmax(map_db), map_db.shape)
+
+    assert abs(peak_row - target_delay) <= 1
+    # Doppler resolution is sample_rate / num_of_samples = 3.9 kHz
+    assert abs(doppler_hz[peak_column] - run_baseline.TARGET_DOPPLER_HZ) < 1_000
