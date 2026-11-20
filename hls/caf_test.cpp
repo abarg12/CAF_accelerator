@@ -22,7 +22,9 @@ const double PI = 3.14159265358979323846;
 const double SAMPLE_RATE = 1000000.0;
 const double FREQ_STEP = SAMPLE_RATE / NUM_OF_SAMPLES;
 const int TARGET_DELAY_IN_SAMPLES = 40;
-const int TARGET_DOPPLER_IN_BINS = 12;
+// Doppler bins range from -NUM_OF_FREQ_BINS/2 + 1 to NUM_OF_FREQ_BINS/2, so
+// keep the target inside the map when it is built with fewer bins
+const int TARGET_DOPPLER_IN_BINS = NUM_OF_FREQ_BINS / 2 - 1 < 12 ? NUM_OF_FREQ_BINS / 2 - 1 : 12;
 const double NOISE_AMPLITUDE = 0.1;
 const double TOLERANCE = 1e-3;
 

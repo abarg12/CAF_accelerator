@@ -26,13 +26,13 @@ void shift_signal(
     DTYPE sample_rate,
     DTYPE shifted_real[NUM_OF_SAMPLES],
     DTYPE shifted_imag[NUM_OF_SAMPLES]) {
-	DTYPE phase_step = 6.283185307178 * freq_shift / sample_rate;
+	DTYPE phase_step = 6.283185307178f * freq_shift / sample_rate;
 
 shift_loop:
 	for (int sample = 0; sample < NUM_OF_SAMPLES; sample++) {
 		DTYPE phase_shift = phase_step * sample;
-		DTYPE c = cos(phase_shift);
-		DTYPE s = sin(phase_shift);
+		DTYPE c = std::cos(phase_shift);
+		DTYPE s = std::sin(phase_shift);
 		shifted_real[sample] = signal_real[sample] * c - signal_imag[sample] * s;
 		shifted_imag[sample] = signal_real[sample] * s + signal_imag[sample] * c;
 	}

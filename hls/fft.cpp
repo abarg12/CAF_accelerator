@@ -9,9 +9,10 @@
  * The original is licensed under Creative Commons Attribution 4.0
  * International (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/
  *
- * Changes from the original: the size constants were renamed, and an
+ * Changes from the original: the size constants were renamed, an
  * `inverse` argument was added so the same function also computes the
- * inverse FFT.
+ * inverse FFT, the twiddle factors use single precision std::cos and
+ * std::sin, and the inner loops have trip count pragmas.
  */
 
 #include <cmath>
@@ -57,7 +58,7 @@ void fft(DTYPE X_R[NUM_OF_SAMPLES], DTYPE X_I[NUM_OF_SAMPLES], bool inverse) {
 	DTYPE a, e, c, s;
 
 	// The inverse FFT uses the opposite sign in the twiddle factor exponent
-	DTYPE two_pi = inverse ? 6.283185307178 : -6.283185307178;
+	DTYPE two_pi = inverse ? 6.283185307178f : -6.283185307178f;
 
 	bit_reverse(X_R, X_I);
 
@@ -66,13 +67,13 @@ stage_loop:
 		DFTpts = 1 << stage;  // DFT = 2^stage = points in sub DFT
 		numBF = DFTpts / 2;   // Butterfly WIDTHS in sub-DFT
 		e = two_pi / DFTpts;
-		a = 0.0;
+		a = 0.0f;
 	// Perform butterflies for j-th stage
 	butterfly_loop:
 		for (j = 0; j < numBF; j++) {
 #pragma HLS loop_tripcount min=1 max=128 avg=32
-			c = cos(a);
-			s = sin(a);
+			c = std::cos(a);
+			s = std::sin(a);
 			a = a + e;
 		// Compute butterflies that use same W**k
 		dft_loop:

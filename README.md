@@ -16,9 +16,8 @@ receive signal.
 
 | File | Purpose |
 | --- | --- |
-| `baseline/caf_baseline.py` | The CAF itself: frequency shifts, FFT cross correlation, range-Doppler map |
-| `baseline/signal_generation.py` | Simulated FM (or white noise) transmit signal, a delayed, Doppler shifted, noisy receive signal, and stationary clutter |
-| `baseline/run_baseline.py` | Plots a range-Doppler map and times the CAF from 8x8 to 256x256 bins |
+| `baseline/caf_baseline.py` | The CAF itself, one function: `cross_ambiguity` |
+| `baseline/run_baseline.py` | Simulates the FM transmit signal and a receive signal with a target, clutter, and noise; plots a range-Doppler map and times the CAF from 8x8 to 256x256 bins |
 | `tests/test_caf_baseline.py` | Checks that the CAF recovers known targets and clutter, and that the FM signal is band limited |
 
 ### Running it
@@ -64,8 +63,7 @@ cut) of the map through the detected target, drawn as steps, one per bin.
 The map looks smooth because neighboring bins hold similar values: a target
 spans about 16 Doppler bins (3.9 kHz resolution / 250 Hz bins) and about 4
 range bins (the FM signal's ~590 m range resolution / 150 m bins). The target is detected as the
-strongest return outside the zero Doppler clutter band. The FPGA core and
-`calculate_cross_ambiguity` return the real part, as in the paper. The
+strongest return outside the zero Doppler clutter band. The FPGA core outputs the real part of the CAF, as in the paper. The
 magnitude is used only for plotting, because the real part swings with the
 phase of each return.
 
@@ -77,9 +75,10 @@ clutter before the CAF to deal with this.
 The tests keep using the white noise transmit signal, because its one bin
 peak makes exact delay and Doppler checks easy.
 
-The range-Doppler map returned by `calculate_cross_ambiguity` has shape
-`(num_of_samples, num_of_freq_bins)`: rows are delay (range) bins and columns
-are Doppler bins. `delay_axis` and `doppler_axis` give the labels for each.
+`cross_ambiguity` returns the complex range-Doppler map with shape
+`(num_of_samples, num_of_freq_bins)`. Row `d` is a delay of `d / Fs`
+seconds, and column `k` is a target Doppler of
+`(k - num_of_freq_bins/2 + 1) * freq_step` Hz.
 
 ## HLS baseline
 
@@ -100,6 +99,21 @@ that later optimizations are measured against.
 From the `hls/` folder:
 
     vitis-run --mode hls --tcl run_hls.tcl
+
+This does two things:
+
+1. C simulation and C synthesis of the full design (256 Doppler bins) in
+   `caf_baseline.proj`. The report is in
+   `caf_baseline.proj/solution/syn/report/csynth.rpt`.
+2. C synthesis and C/RTL co-simulation of a smaller design with 8 Doppler
+   bins in `caf_cosim_8bins.proj`, because co-simulating all 256 bins takes
+   hours. Every Doppler bin does the same work, so the full design's latency
+   is about 256 / 8 = 32 times the measured latency.
+
+Set `CAF_COSIM_BINS` to co-simulate a different number of bins, or to 0 to
+skip co-simulation:
+
+    CAF_COSIM_BINS=4 vitis-run --mode hls --tcl run_hls.tcl
 
 The testbench also runs without Vitis:
 

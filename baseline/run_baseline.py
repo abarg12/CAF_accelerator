@@ -19,16 +19,9 @@ import time
 
 import numpy as np
 
-from caf_baseline import calculate_cross_ambiguity, calculate_cross_ambiguity_complex
-from caf_baseline import delay_axis, doppler_axis
-from signal_generation import (
-    add_stationary_clutter,
-    delay_to_range_meters,
-    generate_fm_transmit_signal,
-    generate_receive_signal,
-    range_meters_to_delay_samples,
-)
+from caf_baseline import cross_ambiguity
 
+SPEED_OF_LIGHT = 299_792_458.0  # m/s
 SAMPLE_RATE = 1_000_000  # Hz
 
 # Total Doppler extent R from Eq. 1, centered on 0 Hz. The Doppler step is
@@ -48,71 +41,69 @@ BENCHMARK_BIN_SIZES = [8, 16, 32, 64, 128, 256]
 BENCHMARK_REPEATS = 20
 
 
-def build_scenario(num_of_samples, num_of_freq_bins, random_generator):
-    """Simulated transmit / receive pair with one moving target and clutter.
+def make_signals(num_of_samples, random_generator):
+    """Simulated transmit and receive signals with one moving target and clutter.
 
-    Delays wrap around for maps too small to hold the full range.
+    Returns (transmit_signal, receive_signal, target_delay, clutter_delays),
+    with delays in samples. Delays are circular, to line up with the circular
+    correlation of the FFT based CAF, and wrap around for maps too small to
+    hold the full range.
     """
-    freq_step = DOPPLER_EXTENT_HZ / num_of_freq_bins
-    target_delay = range_meters_to_delay_samples(TARGET_RANGE_METERS, SAMPLE_RATE) % num_of_samples
-    clutter_delays = [
-        range_meters_to_delay_samples(r, SAMPLE_RATE) % num_of_samples for r, _ in CLUTTER
-    ]
-    clutter_amplitudes = [amplitude for _, amplitude in CLUTTER]
+    sample_times = np.arange(num_of_samples) / SAMPLE_RATE
 
-    transmit_signal = generate_fm_transmit_signal(num_of_samples, SAMPLE_RATE, random_generator)
-    receive_signal = generate_receive_signal(
-        transmit_signal,
+    def range_to_delay(range_meters):
+        return round(2 * range_meters / SPEED_OF_LIGHT * SAMPLE_RATE) % num_of_samples
+
+    # Transmit: an FM broadcast signal at complex baseband. The message stands
+    # in for the FM stereo multiplex baseband (audio, pilot, and stereo
+    # subcarrier out to about 53 kHz): white noise low pass filtered to 53 kHz
+    # and scaled to a peak of 1. It is frequency modulated with the broadcast
+    # deviation of 75 kHz, so by Carson's rule the signal is about
+    # 2 * (75 + 53) = 256 kHz wide.
+    noise_spectrum = np.fft.fft(random_generator.standard_normal(num_of_samples))
+    frequencies = np.fft.fftfreq(num_of_samples, d=1 / SAMPLE_RATE)
+    noise_spectrum[np.abs(frequencies) > 53_000] = 0
+    message = np.fft.ifft(noise_spectrum).real
+    message /= np.max(np.abs(message))
+    transmit_signal = np.exp(2j * np.pi * 75_000 * np.cumsum(message) / SAMPLE_RATE)
+
+    # Receive: the target return (delayed and Doppler shifted), plus noise,
+    # plus zero Doppler returns from stationary clutter
+    target_delay = range_to_delay(TARGET_RANGE_METERS)
+    receive_signal = np.roll(transmit_signal, target_delay) * np.exp(
+        2j * np.pi * TARGET_DOPPLER_HZ * sample_times
+    )
+    noise_power = 10 ** (-SIGNAL_TO_NOISE_RATIO_DB / 10)
+    receive_signal += np.sqrt(noise_power / 2) * (
+        random_generator.standard_normal(num_of_samples)
+        + 1j * random_generator.standard_normal(num_of_samples)
+    )
+    clutter_delays = [range_to_delay(r) for r, _ in CLUTTER]
+    for delay, (_, amplitude) in zip(clutter_delays, CLUTTER):
+        receive_signal += amplitude * np.roll(transmit_signal, delay)
+
+    return (
+        transmit_signal.astype(np.complex64),
+        receive_signal.astype(np.complex64),
         target_delay,
-        TARGET_DOPPLER_HZ,
-        SAMPLE_RATE,
-        SIGNAL_TO_NOISE_RATIO_DB,
-        random_generator,
+        clutter_delays,
     )
-    receive_signal = add_stationary_clutter(
-        receive_signal, transmit_signal, clutter_delays, clutter_amplitudes
-    )
-    return transmit_signal, receive_signal, freq_step, target_delay, clutter_delays
 
 
 def run_benchmark(random_generator):
     print(f"{'bins':>10} {'mean (ms)':>12} {'min (ms)':>12}")
     for bin_size in BENCHMARK_BIN_SIZES:
-        transmit_signal, receive_signal, freq_step, _, _ = build_scenario(
-            bin_size, bin_size, random_generator
-        )
+        transmit_signal, receive_signal, _, _ = make_signals(bin_size, random_generator)
+        freq_step = DOPPLER_EXTENT_HZ / bin_size
         run_times_ms = []
         for _ in range(BENCHMARK_REPEATS):
             start_time = time.perf_counter()
-            calculate_cross_ambiguity(
-                transmit_signal, receive_signal, bin_size, bin_size, freq_step, SAMPLE_RATE
-            )
+            cross_ambiguity(transmit_signal, receive_signal, bin_size, freq_step, SAMPLE_RATE).real
             run_times_ms.append((time.perf_counter() - start_time) * 1e3)
         print(
             f"{f'{bin_size}x{bin_size}':>10} "
             f"{np.mean(run_times_ms):>12.3f} {np.min(run_times_ms):>12.3f}"
         )
-
-
-def range_doppler_magnitude_db(transmit_signal, receive_signal, num_of_samples, num_of_freq_bins,
-                               freq_step):
-    """|CAF| in dB relative to the map's peak, in the same orientation as
-    calculate_cross_ambiguity(): rows are range bins, columns are Doppler bins.
-
-    The paper and the FPGA core output the real part, which swings with the
-    phase of each return. The magnitude does not, so it is easier to read.
-    """
-    cross_ambiguity = calculate_cross_ambiguity_complex(
-        transmit_signal, receive_signal, num_of_samples, num_of_freq_bins, freq_step, SAMPLE_RATE
-    )
-    magnitude = np.fliplr(np.abs(cross_ambiguity).T)
-    return 20 * np.log10(magnitude / magnitude.max() + 1e-12)
-
-
-def cuts_output_path(map_output_path):
-    """File name for the cuts figure: range_doppler_map.png -> range_doppler_map_cuts.png"""
-    stem, extension = os.path.splitext(map_output_path)
-    return f"{stem}_cuts{extension or '.png'}"
 
 
 def plot_range_doppler_map(random_generator, output_path):
@@ -123,22 +114,26 @@ def plot_range_doppler_map(random_generator, output_path):
 
     num_of_samples = 256
     num_of_freq_bins = 256
+    freq_step = DOPPLER_EXTENT_HZ / num_of_freq_bins
     dynamic_range_db = 20
 
-    transmit_signal, receive_signal, freq_step, target_delay, clutter_delays = build_scenario(
-        num_of_samples, num_of_freq_bins, random_generator
+    transmit_signal, receive_signal, target_delay, clutter_delays = make_signals(
+        num_of_samples, random_generator
     )
-    map_db = range_doppler_magnitude_db(
-        transmit_signal, receive_signal, num_of_samples, num_of_freq_bins, freq_step
-    )
-    doppler_khz = doppler_axis(num_of_freq_bins, freq_step) / 1e3
-    range_km = delay_to_range_meters(delay_axis(num_of_samples, SAMPLE_RATE)) / 1e3
+    caf = cross_ambiguity(transmit_signal, receive_signal, num_of_freq_bins, freq_step, SAMPLE_RATE)
+
+    # Plot |CAF| in dB relative to the peak. The FPGA core outputs the real
+    # part, which swings with the phase of each return; the magnitude does
+    # not, so it is easier to read.
+    magnitude = np.abs(caf)
+    map_db = 20 * np.log10(magnitude / magnitude.max() + 1e-12)
+    doppler_khz = (np.arange(num_of_freq_bins) - num_of_freq_bins // 2 + 1) * freq_step / 1e3
+    range_km = SPEED_OF_LIGHT * np.arange(num_of_samples) / SAMPLE_RATE / 2 / 1e3
 
     # Detect the moving target as the strongest return outside the zero
     # Doppler clutter band (one Doppler resolution cell on each side of 0 Hz).
-    doppler_resolution_khz = SAMPLE_RATE / num_of_samples / 1e3
-    clutter_band = np.abs(doppler_khz) < doppler_resolution_khz
-    moving_map_db = np.where(clutter_band[np.newaxis, :], -np.inf, map_db)
+    clutter_band = np.abs(doppler_khz) < SAMPLE_RATE / num_of_samples / 1e3
+    moving_map_db = np.where(clutter_band, -np.inf, map_db)
     peak_row, peak_column = np.unravel_index(np.argmax(moving_map_db), map_db.shape)
 
     # Figure 1: the range-Doppler map. pcolormesh draws one flat square per
@@ -167,7 +162,8 @@ def plot_range_doppler_map(random_generator, output_path):
 
     # Figure 2: one row and one column of the map through the detected target,
     # drawn as steps so that each flat segment is one bin.
-    cuts_path = cuts_output_path(output_path)
+    stem, extension = os.path.splitext(output_path)
+    cuts_path = f"{stem}_cuts{extension or '.png'}"
     cuts_figure, (doppler_cut_axis, range_cut_axis) = plt.subplots(2, 1, figsize=(9, 7))
 
     doppler_cut_axis.step(doppler_khz, map_db[peak_row], where="mid", lw=1)

@@ -5,7 +5,11 @@ typedef float DTYPE;
 
 #define LOG2_NUM_OF_SAMPLES 8                    /* Number of FFT stages */
 #define NUM_OF_SAMPLES (1 << LOG2_NUM_OF_SAMPLES) /* Samples per signal = FFT size */
-#define NUM_OF_FREQ_BINS 256                     /* Doppler bins */
+/* Doppler bins. Can be overridden with -DNUM_OF_FREQ_BINS=<n> (even) for a
+ * faster C/RTL co-simulation, see run_hls.tcl. */
+#ifndef NUM_OF_FREQ_BINS
+#define NUM_OF_FREQ_BINS 256
+#endif
 
 /*
  * Top level function: Cross Ambiguity Function.
@@ -15,7 +19,7 @@ typedef float DTYPE;
  *
  * The output is the range-Doppler map, stored row by row with
  * NUM_OF_SAMPLES rows (delay) and NUM_OF_FREQ_BINS columns (Doppler). It
- * matches calculate_cross_ambiguity() in baseline/caf_baseline.py.
+ * matches the real part of cross_ambiguity() in baseline/caf_baseline.py.
  */
 void cross_ambiguity(
     DTYPE transmit_real[NUM_OF_SAMPLES],

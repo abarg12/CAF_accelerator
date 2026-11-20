@@ -1,88 +1,85 @@
-"""Checks that the CAF baseline recovers a known target delay and Doppler."""
+"""Checks that the CAF baseline recovers known targets and clutter."""
 
 import os
 import sys
 
 import numpy as np
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "baseline"))
 
-from caf_baseline import (  # noqa: E402
-    calculate_cross_ambiguity,
-    cross_correlation,
-    delay_axis,
-    doppler_axis,
-)
-from signal_generation import generate_receive_signal, generate_transmit_signal  # noqa: E402
+import run_baseline  # noqa: E402
+from caf_baseline import cross_ambiguity  # noqa: E402
 
 SAMPLE_RATE = 1_000_000
 
 
-def find_peak(num_of_samples, num_of_freq_bins, delay_in_samples, doppler_bins):
+def white_noise(num_of_samples, random_generator):
+    """Unit power complex white noise. Its ambiguity function is a one bin
+    "thumbtack", which makes exact delay and Doppler checks easy."""
+    return (
+        (random_generator.standard_normal(num_of_samples)
+         + 1j * random_generator.standard_normal(num_of_samples)) / np.sqrt(2)
+    ).astype(np.complex64)
+
+
+@pytest.mark.parametrize(
+    "num_of_samples, delay, doppler_bins", [(256, 40, 12), (256, 100, -30), (128, 5, 0)]
+)
+def test_recovers_target_delay_and_doppler(num_of_samples, delay, doppler_bins):
     random_generator = np.random.default_rng(seed=1)
     freq_step = SAMPLE_RATE / num_of_samples
-    doppler_shift_hz = doppler_bins * freq_step
+    sample_times = np.arange(num_of_samples) / SAMPLE_RATE
 
-    transmit_signal = generate_transmit_signal(num_of_samples, random_generator)
-    receive_signal = generate_receive_signal(
-        transmit_signal, delay_in_samples, doppler_shift_hz, SAMPLE_RATE, 10, random_generator
-    )
-    range_doppler_map = calculate_cross_ambiguity(
-        transmit_signal, receive_signal, num_of_samples, num_of_freq_bins, freq_step, SAMPLE_RATE
-    )
-    peak_row, peak_column = np.unravel_index(np.argmax(range_doppler_map), range_doppler_map.shape)
-    return (
-        range_doppler_map.shape,
-        delay_axis(num_of_samples, SAMPLE_RATE)[peak_row] * SAMPLE_RATE,
-        doppler_axis(num_of_freq_bins, freq_step)[peak_column] / freq_step,
-    )
+    transmit_signal = white_noise(num_of_samples, random_generator)
+    receive_signal = np.roll(transmit_signal, delay) * np.exp(
+        2j * np.pi * doppler_bins * freq_step * sample_times
+    ) + 0.3 * white_noise(num_of_samples, random_generator)
+
+    caf = cross_ambiguity(transmit_signal, receive_signal, num_of_samples, freq_step, SAMPLE_RATE)
+    peak_row, peak_column = np.unravel_index(np.argmax(caf.real), caf.shape)
+    assert peak_row == delay
+    assert peak_column - num_of_samples // 2 + 1 == doppler_bins
 
 
 def test_output_shape_is_samples_by_freq_bins():
-    shape, _, _ = find_peak(256, 64, 10, 0)
-    assert shape == (256, 64)
+    signal = white_noise(256, np.random.default_rng(seed=1))
+    assert cross_ambiguity(signal, signal, 64, 1000, SAMPLE_RATE).shape == (256, 64)
 
 
-def test_recovers_delay_and_positive_doppler():
-    _, delay, doppler = find_peak(256, 256, 40, 12)
-    assert round(delay) == 40
-    assert round(doppler) == 12
-
-
-def test_recovers_delay_and_negative_doppler():
-    _, delay, doppler = find_peak(256, 256, 100, -30)
-    assert round(delay) == 100
-    assert round(doppler) == -30
-
-
-def test_recovers_stationary_target():
-    _, delay, doppler = find_peak(128, 128, 5, 0)
-    assert round(delay) == 5
-    assert round(doppler) == 0
-
-
-def test_cross_correlation_matches_direct_sum():
+def test_zero_doppler_column_matches_direct_correlation_sum():
     random_generator = np.random.default_rng(seed=2)
     num_of_samples = 32
-    transmit_signal = generate_transmit_signal(num_of_samples, random_generator)
-    receive_signal = generate_transmit_signal(num_of_samples, random_generator)
+    transmit_signal = white_noise(num_of_samples, random_generator)
+    receive_signal = white_noise(num_of_samples, random_generator)
 
     direct = np.array(
         [
             np.sum(np.conj(transmit_signal) * np.roll(receive_signal, -lag))
             for lag in range(num_of_samples)
         ]
+    ) / num_of_samples
+    caf = cross_ambiguity(transmit_signal, receive_signal, 4, 1000, SAMPLE_RATE)
+    # Column k is a Doppler of (k - 4/2 + 1) bins, so column 1 is 0 Hz
+    assert np.allclose(caf[:, 1], direct, atol=1e-4)
+
+
+def test_stationary_clutter_appears_at_zero_doppler():
+    num_of_samples = 256
+    transmit_signal = white_noise(num_of_samples, np.random.default_rng(seed=4))
+    receive_signal = np.roll(transmit_signal, 30) + 0.5 * np.roll(transmit_signal, 90)
+
+    caf = cross_ambiguity(
+        transmit_signal, receive_signal, num_of_samples, SAMPLE_RATE / num_of_samples, SAMPLE_RATE
     )
-    assert np.allclose(cross_correlation(transmit_signal, receive_signal), direct, atol=1e-3)
+    zero_doppler_column = num_of_samples // 2 - 1
+    assert np.isclose(caf.real[30, zero_doppler_column], 1.0, atol=0.05)
+    assert np.isclose(caf.real[90, zero_doppler_column], 0.5, atol=0.05)
 
 
 def test_fm_transmit_signal_is_constant_envelope_and_band_limited():
-    from signal_generation import generate_fm_transmit_signal
-
     num_of_samples = 4096
-    signal = generate_fm_transmit_signal(
-        num_of_samples, SAMPLE_RATE, np.random.default_rng(seed=3)
-    )
+    signal, _, _, _ = run_baseline.make_signals(num_of_samples, np.random.default_rng(seed=3))
     assert np.allclose(np.abs(signal), 1, atol=1e-5)
 
     # Carson's rule: about 2 * (75 + 53) = 256 kHz. Almost all power lies within
@@ -92,36 +89,18 @@ def test_fm_transmit_signal_is_constant_envelope_and_band_limited():
     assert power[np.abs(frequencies) <= 200_000].sum() / power.sum() > 0.99
 
 
-def test_stationary_clutter_appears_at_zero_doppler():
-    from signal_generation import add_stationary_clutter
-
-    num_of_samples = 256
-    freq_step = SAMPLE_RATE / num_of_samples
-    transmit_signal = generate_transmit_signal(num_of_samples, np.random.default_rng(seed=4))
-    receive_signal = add_stationary_clutter(
-        np.zeros(num_of_samples, dtype=np.complex64), transmit_signal, [30, 90], [1.0, 0.5]
-    )
-    range_doppler_map = calculate_cross_ambiguity(
-        transmit_signal, receive_signal, num_of_samples, num_of_samples, freq_step, SAMPLE_RATE
-    )
-    zero_doppler_column = int(np.argmin(np.abs(doppler_axis(num_of_samples, freq_step))))
-    assert np.isclose(range_doppler_map[30, zero_doppler_column], 1.0, atol=0.05)
-    assert np.isclose(range_doppler_map[90, zero_doppler_column], 0.5, atol=0.05)
-
-
 def test_paper_scenario_recovers_moving_target():
-    import run_baseline
-
     num_of_samples = 256
-    transmit_signal, receive_signal, freq_step, target_delay, _ = run_baseline.build_scenario(
-        num_of_samples, num_of_samples, np.random.default_rng(seed=0)
+    freq_step = run_baseline.DOPPLER_EXTENT_HZ / num_of_samples
+    transmit_signal, receive_signal, target_delay, _ = run_baseline.make_signals(
+        num_of_samples, np.random.default_rng(seed=0)
     )
-    map_db = run_baseline.range_doppler_magnitude_db(
-        transmit_signal, receive_signal, num_of_samples, num_of_samples, freq_step
+    magnitude = np.abs(
+        cross_ambiguity(transmit_signal, receive_signal, num_of_samples, freq_step, SAMPLE_RATE)
     )
-    doppler_hz = doppler_axis(num_of_samples, freq_step)
-    map_db[:, np.abs(doppler_hz) < SAMPLE_RATE / num_of_samples] = -np.inf  # ignore clutter
-    peak_row, peak_column = np.unravel_index(np.argmax(map_db), map_db.shape)
+    doppler_hz = (np.arange(num_of_samples) - num_of_samples // 2 + 1) * freq_step
+    magnitude[:, np.abs(doppler_hz) < SAMPLE_RATE / num_of_samples] = 0  # ignore clutter
+    peak_row, peak_column = np.unravel_index(np.argmax(magnitude), magnitude.shape)
 
     assert abs(peak_row - target_delay) <= 1
     # Doppler resolution is sample_rate / num_of_samples = 3.9 kHz
