@@ -5,8 +5,8 @@ typedef float DTYPE;
 
 #define LOG2_NUM_OF_SAMPLES 8                    /* Number of FFT stages */
 #define NUM_OF_SAMPLES (1 << LOG2_NUM_OF_SAMPLES) /* Samples per signal = FFT size */
-/* Doppler bins. Can be overridden with -DNUM_OF_FREQ_BINS=<n> (even) for a
- * faster C/RTL co-simulation, see run_hls.tcl. */
+/* Doppler bins. run_hls.tcl overrides this with -DNUM_OF_FREQ_BINS=<n>
+ * (even) so that C/RTL co-simulation finishes quickly. */
 #ifndef NUM_OF_FREQ_BINS
 #define NUM_OF_FREQ_BINS 256
 #endif

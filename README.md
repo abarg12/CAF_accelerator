@@ -82,38 +82,45 @@ seconds, and column `k` is a target Doppler of
 
 ## HLS baseline
 
-The Vitis HLS baseline in `hls/` is a direct C++ port of the Python reference
+Each HLS design lives in its own folder under `hls/`, with its own copy of
+the sources, its own `run_hls.tcl`, and its own Vitis project, so every
+version stays buildable and its results can be compared side by side. To
+start an optimization, copy the sources of the version it builds on into a
+new folder, rename the project in its `run_hls.tcl`, and make the changes
+there:
+
+    mkdir hls/pipeline_dft
+    cp hls/baseline/*.cpp hls/baseline/*.h hls/baseline/run_hls.tcl hls/pipeline_dft/
+
+The Vitis HLS baseline in `hls/baseline/` is a direct C++ port of the Python reference
 model, with no HLS pragmas. It gives the starting latency and resource numbers
 that later optimizations are measured against.
 
 | File | Purpose |
 | --- | --- |
-| `hls/caf.cpp` | Top function `cross_ambiguity`: frequency shift, FFT cross correlation, range-Doppler map |
-| `hls/fft.cpp` | Radix-2 FFT and inverse FFT |
-| `hls/caf.h` | Sizes (256 samples, 256 Doppler bins), data type, and prototypes |
-| `hls/caf_test.cpp` | Self checking testbench |
-| `hls/run_hls.tcl` | C simulation, C synthesis, and C/RTL co-simulation for the PYNQ-Z2 (xc7z020clg400-1) at 100 MHz |
+| `hls/baseline/caf.cpp` | Top function `cross_ambiguity`: frequency shift, FFT cross correlation, range-Doppler map |
+| `hls/baseline/fft.cpp` | Radix-2 FFT and inverse FFT |
+| `hls/baseline/caf.h` | Sizes (256 samples, 256 Doppler bins), data type, and prototypes |
+| `hls/baseline/caf_test.cpp` | Self checking testbench |
+| `hls/baseline/run_hls.tcl` | C simulation, C synthesis, and C/RTL co-simulation for the PYNQ-Z2 (xc7z020clg400-1) at 100 MHz |
 
 ### Running it
 
-From the `hls/` folder:
+From the `hls/baseline/` folder:
 
     vitis-run --mode hls --tcl run_hls.tcl
 
-This does two things:
+This runs C simulation, C synthesis, and C/RTL co-simulation in
+`caf_baseline.proj`. The synthesis report is in
+`caf_baseline.proj/solution/syn/report/csynth.rpt` and the measured latency
+in `caf_baseline.proj/solution/sim/report/cross_ambiguity_cosim.rpt`.
 
-1. C simulation and C synthesis of the full design (256 Doppler bins) in
-   `caf_baseline.proj`. The report is in
-   `caf_baseline.proj/solution/syn/report/csynth.rpt`.
-2. C synthesis and C/RTL co-simulation of a smaller design with 8 Doppler
-   bins in `caf_cosim_8bins.proj`, because co-simulating all 256 bins takes
-   hours. Every Doppler bin does the same work, so the full design's latency
-   is about 256 / 8 = 32 times the measured latency.
+The design is built with 8 Doppler bins instead of 256, because
+co-simulating all 256 bins takes hours. Every Doppler bin does the same work,
+so the full design's latency is about 256 / 8 = 32 times the measured
+latency. Set `CAF_FREQ_BINS` to build a different size:
 
-Set `CAF_COSIM_BINS` to co-simulate a different number of bins, or to 0 to
-skip co-simulation:
-
-    CAF_COSIM_BINS=4 vitis-run --mode hls --tcl run_hls.tcl
+    CAF_FREQ_BINS=256 vitis-run --mode hls --tcl run_hls.tcl
 
 The testbench also runs without Vitis:
 
@@ -126,7 +133,7 @@ The testbench also runs without Vitis:
   Radio Conference, 2025. The Python baseline and the CAF structure follow
   this paper.
 - R. Kastner, J. Matai, and S. Neuendorffer, "Parallel Programming for FPGAs,"
-  https://github.com/KastnerRG/pp4fpgas. The FFT in `hls/fft.cpp` is adapted
+  https://github.com/KastnerRG/pp4fpgas. The FFT in `hls/baseline/fft.cpp` is adapted
   from the `fft_sw` example in this repository, which is licensed under
   [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The changes are
   listed at the top of that file.

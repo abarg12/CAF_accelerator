@@ -3,7 +3,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 range_doppler_map.png
-hls/*.proj/
-hls/caf_test
+hls/**/*.proj/
+hls/**/caf_test
 *.log
 range_doppler_map_cuts.png
