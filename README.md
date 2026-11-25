@@ -126,7 +126,56 @@ The testbench also runs without Vitis:
 
     g++ -o caf_test caf.cpp fft.cpp caf_test.cpp && ./caf_test
 
-## References
+## HLS optimized design
+
+`hls/optimized/` computes the same range-Doppler map with the same
+top-level interface and testbench as the baseline. It is built and run the
+same way, from its own folder, into `caf_optimized.proj`. It uses
+`hls::stream`, so unlike the baseline its testbench needs Vitis (`vitis-run`
+C simulation) rather than plain g++.
+
+| File | Purpose |
+| --- | --- |
+| `hls/optimized/caf.cpp` | Top function `cross_ambiguity` as a dataflow pipeline of five processes |
+| `hls/optimized/fft.cpp` | Streaming radix-2 FFT with one butterfly per cycle |
+| `hls/optimized/twiddles.h` | Twiddle factor ROM, written by `gen_twiddles.py` |
+| `hls/optimized/caf.h` | Sizes, data types, and prototypes |
+| `hls/optimized/caf_test.cpp` | Same self checking testbench as the baseline |
+| `hls/optimized/run_hls.tcl` | Same flow as the baseline, project `caf_optimized.proj` |
+
+The optimizations, against the baseline synthesis report:
+
+1. **Twiddle factor ROM.** The baseline calls `std::cos` and `std::sin`
+   (28 cycles each) for every butterfly group. The optimized FFT reads
+   precomputed twiddles from a 128 entry ROM.
+2. **Pipelined butterflies.** The baseline's butterfly loop runs at II=25,
+   because the tool cannot prove that butterflies in one stage use different
+   samples. Each stage is now one loop over all 128 butterflies at II=1, with
+   a `dependence` pragma that states this.
+3. **Banked FFT memory.** A butterfly reads and writes two samples, which
+   needs four memory ports per cycle. The samples are split into two banks by
+   the parity of their index. The two inputs of a butterfly differ in one
+   bit, so they are always in different banks, and each bank needs only one
+   read and one write per cycle.
+4. **Free bit reversal.** Samples are written to their bit reversed address
+   while the frame is loaded, instead of in a separate pass.
+5. **Pipelined frequency shift, multiply, and output.** Every loop runs at
+   II=1, and the divide by N^2 is a multiply by the exact power of two 1/N^2.
+6. **Dataflow across Doppler bins.** Frequency shift, forward FFT, spectrum
+   multiply, inverse FFT, and output are separate processes connected by
+   streams, each looping over the Doppler bins. Different bins are in
+   different processes at the same time.
+7. **Shared FFT cores.** The transmit FFT goes through the forward FFT core
+   as frame 0, before the shifted receive frames, so the design has two FFT
+   cores instead of three. The inverse FFT uses the same code as the forward
+   one, through IFFT(X) = conj(FFT(conj(X))).
+
+The slowest process is each FFT, which takes about 256 cycles to load a
+frame, 8 x (128 + pipeline depth) cycles for the stages, and 256 cycles to
+write the result, so roughly 1,700 to 1,800 cycles per Doppler bin. For 256
+bins that is about 0.45 million cycles, against about 1.7 billion for the
+baseline.
+
 
 - C. D. Long, T. Brant, L. Brand, and J. D. Ouellette, "Hardware-in-the-Loop
   Simulation with PYNQ for Radar Applications," Proceedings of the 15th GNU
